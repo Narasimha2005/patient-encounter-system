@@ -1,0 +1,29 @@
+[project]
+name = "mems"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Narasimha2005",email = "narasimha19042005@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+]
+
+[tool.poetry]
+packages = [{include = "mems", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.ruff]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
