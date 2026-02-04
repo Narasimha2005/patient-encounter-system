@@ -43,18 +43,13 @@ def create_appointment(db: Session, data):
     # 4️⃣ Calculate new appointment start time and end time
     appointment_start_time = data.appointment_start_datetime
     appointment_duration_minutes = data.appointment_duration
-    appointment_end_time = (
-        appointment_start_time
-        + timedelta(minutes=appointment_duration_minutes)
+    appointment_end_time = appointment_start_time + timedelta(
+        minutes=appointment_duration_minutes
     )
 
     # 5️⃣ Fetch existing appointments for the doctor
     existing_appointments = (
-        db.execute(
-            select(Appointment).where(
-                Appointment.doctor_id == data.doctor_id
-            )
-        )
+        db.execute(select(Appointment).where(Appointment.doctor_id == data.doctor_id))
         .scalars()
         .all()
     )
@@ -65,9 +60,8 @@ def create_appointment(db: Session, data):
             existing_appointment.appointment_start_datetime
         )
         existing_duration_minutes = existing_appointment.appointment_duration
-        existing_end_time = (
-            existing_start_time
-            + timedelta(minutes=existing_duration_minutes)
+        existing_end_time = existing_start_time + timedelta(
+            minutes=existing_duration_minutes
         )
 
         # Overlap condition:
@@ -102,17 +96,11 @@ def list_appointments(db: Session, date, doctor_id=None):
     Optionally filter by doctor.
     """
 
-    start_of_day = datetime.combine(
-        date, datetime.min.time(), tzinfo=timezone.utc
-    )
-    end_of_day = datetime.combine(
-        date, datetime.max.time(), tzinfo=timezone.utc
-    )
+    start_of_day = datetime.combine(date, datetime.min.time(), tzinfo=timezone.utc)
+    end_of_day = datetime.combine(date, datetime.max.time(), tzinfo=timezone.utc)
 
     stmt = select(Appointment).where(
-        Appointment.appointment_start_datetime.between(
-            start_of_day, end_of_day
-        )
+        Appointment.appointment_start_datetime.between(start_of_day, end_of_day)
     )
 
     if doctor_id is not None:
