@@ -25,6 +25,3 @@ class PatientRead(BaseModel):
         if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
             raise ValueError("Datetime must be timezone-aware")
         return value
-
-    class Config:
-        from_attributes = True

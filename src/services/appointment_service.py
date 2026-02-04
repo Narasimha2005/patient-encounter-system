@@ -36,7 +36,7 @@ def create_appointment(db: Session, data):
         existing_start = ensure_utc(appt.appointment_start_datetime)
         existing_end = existing_start + timedelta(minutes=appt.appointment_duration)
 
-        if  new_start < existing_end and new_end > existing_start:
+        if new_start < existing_end and new_end > existing_start:
             raise HTTPException(
                 status_code=409,
                 detail="Appointment conflict",
