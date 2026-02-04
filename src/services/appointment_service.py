@@ -9,61 +9,113 @@ from src.services.utils import ensure_utc
 
 
 def create_appointment(db: Session, data):
-    # 1. Future check
-    if data.appointment_start_datetime <= datetime.now(timezone.utc):
-        raise HTTPException(status_code=400, detail="Appointment must be in the future")
+    """
+    Create a medical appointment while enforcing domain rules:
+    - Appointment must be in the future
+    - Doctor must be active
+    - Patient must exist
+    - No overlapping appointments for the same doctor
+    """
 
-    # 2. Doctor validation
+    # 1️⃣ Appointment must be scheduled in the future
+    if data.appointment_start_datetime <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=400,
+            detail="Appointment must be in the future",
+        )
+
+    # 2️⃣ Doctor must exist and be active
     doctor = db.get(Doctor, data.doctor_id)
     if not doctor or not doctor.active_status:
-        raise HTTPException(status_code=400, detail="Doctor unavailable")
+        raise HTTPException(
+            status_code=400,
+            detail="Doctor unavailable",
+        )
 
-    # 3. Patient validation
-    if not db.get(Patient, data.patient_id):
-        raise HTTPException(status_code=400, detail="Patient not found")
+    # 3️⃣ Patient must exist
+    patient = db.get(Patient, data.patient_id)
+    if not patient:
+        raise HTTPException(
+            status_code=400,
+            detail="Patient not found",
+        )
 
-    new_start = data.appointment_start_datetime
-    new_end = new_start + timedelta(minutes=data.appointment_duration)
+    # 4️⃣ Calculate new appointment start time and end time
+    appointment_start_time = data.appointment_start_datetime
+    appointment_duration_minutes = data.appointment_duration
+    appointment_end_time = (
+        appointment_start_time
+        + timedelta(minutes=appointment_duration_minutes)
+    )
 
-    # 4. Conflict detection (DB-agnostic)
+    # 5️⃣ Fetch existing appointments for the doctor
     existing_appointments = (
-        db.execute(select(Appointment).where(Appointment.doctor_id == data.doctor_id))
+        db.execute(
+            select(Appointment).where(
+                Appointment.doctor_id == data.doctor_id
+            )
+        )
         .scalars()
         .all()
     )
 
-    for appt in existing_appointments:
-        existing_start = ensure_utc(appt.appointment_start_datetime)
-        existing_end = existing_start + timedelta(minutes=appt.appointment_duration)
+    # 6️⃣ Check for overlapping appointments using start time and duration
+    for existing_appointment in existing_appointments:
+        existing_start_time = ensure_utc(
+            existing_appointment.appointment_start_datetime
+        )
+        existing_duration_minutes = existing_appointment.appointment_duration
+        existing_end_time = (
+            existing_start_time
+            + timedelta(minutes=existing_duration_minutes)
+        )
 
-        if new_start < existing_end and new_end > existing_start:
+        # Overlap condition:
+        # Two appointments overlap if their time windows intersect
+        if not (
+            appointment_end_time <= existing_start_time
+            or appointment_start_time >= existing_end_time
+        ):
             raise HTTPException(
                 status_code=409,
                 detail="Appointment conflict",
             )
 
-    # 5. Create appointment
-    appt = Appointment(**data.model_dump())
-    db.add(appt)
+    # 7️⃣ Persist appointment
+    appointment = Appointment(**data.model_dump())
+    db.add(appointment)
     db.commit()
-    db.refresh(appt)
+    db.refresh(appointment)
 
-    # 6. Normalize datetimes for SQLite
-    appt.created_at = ensure_utc(appt.created_at)
-    appt.appointment_start_datetime = ensure_utc(appt.appointment_start_datetime)
+    # 8️⃣ Normalize datetime fields to UTC (SQLite safety)
+    appointment.created_at = ensure_utc(appointment.created_at)
+    appointment.appointment_start_datetime = ensure_utc(
+        appointment.appointment_start_datetime
+    )
 
-    return appt
+    return appointment
 
 
 def list_appointments(db: Session, date, doctor_id=None):
-    start = datetime.combine(date, datetime.min.time(), tzinfo=timezone.utc)
-    end = datetime.combine(date, datetime.max.time(), tzinfo=timezone.utc)
+    """
+    Retrieve appointments for a given date.
+    Optionally filter by doctor.
+    """
 
-    stmt = select(Appointment).where(
-        Appointment.appointment_start_datetime.between(start, end)
+    start_of_day = datetime.combine(
+        date, datetime.min.time(), tzinfo=timezone.utc
+    )
+    end_of_day = datetime.combine(
+        date, datetime.max.time(), tzinfo=timezone.utc
     )
 
-    if doctor_id:
+    stmt = select(Appointment).where(
+        Appointment.appointment_start_datetime.between(
+            start_of_day, end_of_day
+        )
+    )
+
+    if doctor_id is not None:
         stmt = stmt.where(Appointment.doctor_id == doctor_id)
 
     return db.scalars(stmt).all()
