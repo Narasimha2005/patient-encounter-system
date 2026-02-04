@@ -24,11 +24,3 @@ SessionLocal = sessionmaker(bind=engine)
 
 class Base(DeclarativeBase):
     pass
-
-
-# =========================
-# CREATE TABLES
-# =========================
-
-# NOTE: Use Alembic for production systems
-Base.metadata.create_all(engine)

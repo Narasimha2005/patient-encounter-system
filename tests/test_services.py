@@ -1,11 +1,14 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.database import Base
-from src.models.models import Appointment, Doctor, Patient
+from src.models.models import Doctor, Patient
+from src.schemas.appointment import AppointmentCreate
+from src.services.appointment_service import create_appointment
 
 
 # ------------------------
@@ -20,6 +23,7 @@ def db_session():
     db = SessionLocalTest()
 
     yield db
+
     db.close()
 
 
@@ -50,163 +54,112 @@ def create_doctor(db, active=True):
 
 
 # ------------------------
-# Appointment Service Logic Tests
+# Appointment Service Tests
 # ------------------------
-def test_create_appointment_success(db_session):
+def test_service_creates_valid_appointment(db_session):
     patient = create_patient(db_session)
     doctor = create_doctor(db_session)
 
-    start_time = datetime.now(timezone.utc) + timedelta(hours=1)
-
-    appointment = Appointment(
+    data = AppointmentCreate(
         patient_id=patient.id,
         doctor_id=doctor.id,
-        appointment_start_datetime=start_time,
+        appointment_start_datetime=datetime.now(timezone.utc) + timedelta(hours=1),
         appointment_duration=30,
     )
 
-    db_session.add(appointment)
-    db_session.commit()
+    appointment = create_appointment(db_session, data)
 
-    saved = db_session.get(Appointment, appointment.id)
-    assert saved is not None
-    assert saved.appointment_duration == 30
+    assert appointment.id is not None
+    assert appointment.appointment_duration == 30
 
 
-def test_reject_appointment_in_past(db_session):
+def test_service_rejects_past_appointment(db_session):
     patient = create_patient(db_session)
     doctor = create_doctor(db_session)
 
-    past_time = datetime.now(timezone.utc) - timedelta(minutes=10)
-
-    appointment = Appointment(
+    data = AppointmentCreate(
         patient_id=patient.id,
         doctor_id=doctor.id,
-        appointment_start_datetime=past_time,
+        appointment_start_datetime=datetime.now(timezone.utc) - timedelta(minutes=10),
         appointment_duration=30,
     )
 
-    db_session.add(appointment)
-    db_session.commit()
+    with pytest.raises(HTTPException) as exc:
+        create_appointment(db_session, data)
 
-    saved = db_session.get(Appointment, appointment.id)
-    # assert saved.appointment_start_datetime < datetime.now(timezone.utc)
-
-    # SQLite does not preserve tzinfo; service layer must prevent this insert
-    assert saved.appointment_start_datetime.tzinfo is None
+    assert exc.value.status_code == 400
 
 
-def test_doctor_inactive_cannot_accept_appointments(db_session):
+def test_service_rejects_inactive_doctor(db_session):
     patient = create_patient(db_session)
     doctor = create_doctor(db_session, active=False)
 
-    start_time = datetime.now(timezone.utc) + timedelta(hours=1)
-
-    appointment = Appointment(
+    data = AppointmentCreate(
         patient_id=patient.id,
         doctor_id=doctor.id,
-        appointment_start_datetime=start_time,
+        appointment_start_datetime=datetime.now(timezone.utc) + timedelta(hours=1),
         appointment_duration=30,
     )
 
-    db_session.add(appointment)
-    db_session.commit()
+    with pytest.raises(HTTPException) as exc:
+        create_appointment(db_session, data)
 
-    saved = db_session.get(Appointment, appointment.id)
-    assert saved.doctor.active_status is False
-
-    # Business rule:
-    # Service must prevent scheduling for inactive doctors.
+    assert exc.value.status_code == 400
 
 
-def test_detect_overlapping_appointments_same_doctor(db_session):
+def test_service_detects_overlapping_appointments(db_session):
     patient = create_patient(db_session)
     doctor = create_doctor(db_session)
 
-    start = datetime.now(timezone.utc) + timedelta(hours=2)
+    start_time = datetime.now(timezone.utc) + timedelta(hours=2)
 
-    appt1 = Appointment(
-        patient_id=patient.id,
-        doctor_id=doctor.id,
-        appointment_start_datetime=start,
-        appointment_duration=60,
+    create_appointment(
+        db_session,
+        AppointmentCreate(
+            patient_id=patient.id,
+            doctor_id=doctor.id,
+            appointment_start_datetime=start_time,
+            appointment_duration=60,
+        ),
     )
 
-    appt2 = Appointment(
+    overlapping = AppointmentCreate(
         patient_id=patient.id,
         doctor_id=doctor.id,
-        appointment_start_datetime=start + timedelta(minutes=30),
+        appointment_start_datetime=start_time + timedelta(minutes=30),
         appointment_duration=30,
     )
 
-    db_session.add(appt1)
-    db_session.commit()
+    with pytest.raises(HTTPException) as exc:
+        create_appointment(db_session, overlapping)
 
-    db_session.add(appt2)
-    db_session.commit()
-
-    appointments = (
-        db_session.query(Appointment).filter(Appointment.doctor_id == doctor.id).all()
-    )
-
-    assert len(appointments) == 2
-
-    # Service layer must detect overlap and reject appt2.
+    assert exc.value.status_code == 409
 
 
-def test_allow_back_to_back_appointments(db_session):
+def test_service_allows_back_to_back_appointments(db_session):
     patient = create_patient(db_session)
     doctor = create_doctor(db_session)
 
-    start = datetime.now(timezone.utc) + timedelta(hours=3)
+    start_time = datetime.now(timezone.utc) + timedelta(hours=3)
 
-    appt1 = Appointment(
-        patient_id=patient.id,
-        doctor_id=doctor.id,
-        appointment_start_datetime=start,
-        appointment_duration=30,
+    create_appointment(
+        db_session,
+        AppointmentCreate(
+            patient_id=patient.id,
+            doctor_id=doctor.id,
+            appointment_start_datetime=start_time,
+            appointment_duration=30,
+        ),
     )
 
-    appt2 = Appointment(
-        patient_id=patient.id,
-        doctor_id=doctor.id,
-        appointment_start_datetime=start + timedelta(minutes=30),
-        appointment_duration=30,
+    second = create_appointment(
+        db_session,
+        AppointmentCreate(
+            patient_id=patient.id,
+            doctor_id=doctor.id,
+            appointment_start_datetime=start_time + timedelta(minutes=30),
+            appointment_duration=30,
+        ),
     )
 
-    db_session.add_all([appt1, appt2])
-    db_session.commit()
-
-    appointments = (
-        db_session.query(Appointment)
-        .filter(Appointment.doctor_id == doctor.id)
-        .order_by(Appointment.appointment_start_datetime)
-        .all()
-    )
-
-    assert len(appointments) == 2
-    assert appointments[1].appointment_start_datetime == (
-        appointments[0].appointment_start_datetime + timedelta(minutes=30)
-    )
-
-
-def test_timezone_naive_datetime_is_stored_but_invalid(db_session):
-    patient = create_patient(db_session)
-    doctor = create_doctor(db_session)
-
-    naive_time = datetime.now() + timedelta(hours=1)
-
-    appointment = Appointment(
-        patient_id=patient.id,
-        doctor_id=doctor.id,
-        appointment_start_datetime=naive_time,
-        appointment_duration=30,
-    )
-
-    db_session.add(appointment)
-    db_session.commit()
-
-    saved = db_session.get(Appointment, appointment.id)
-    assert saved.appointment_start_datetime.tzinfo is None
-
-    # Schema + service must block this before DB insert.
+    assert second is not None

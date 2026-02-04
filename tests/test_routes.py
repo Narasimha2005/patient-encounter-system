@@ -76,6 +76,54 @@ def test_create_appointment(client):
     assert res.json()["appointment_duration"] == 30
 
 
+def test_overlapping_appointments_conflict(client):
+    patient = client.post(
+        "/patients",
+        json={
+            "first_name": "X",
+            "last_name": "Y",
+            "email_address": "xy@test.com",
+            "phone_number": "111",
+        },
+    ).json()
+
+    doctor = client.post(
+        "/doctors",
+        json={
+            "full_name": "Dr Conflict",
+            "medical_specialization": "General",
+            "active_status": True,
+        },
+    ).json()
+
+    start_time = datetime.now(timezone.utc) + timedelta(hours=2)
+
+    res1 = client.post(
+        "/appointments",
+        json={
+            "patient_id": patient["id"],
+            "doctor_id": doctor["id"],
+            "appointment_start_datetime": start_time.isoformat(),
+            "appointment_duration": 60,
+        },
+    )
+    assert res1.status_code == 201
+
+    res2 = client.post(
+        "/appointments",
+        json={
+            "patient_id": patient["id"],
+            "doctor_id": doctor["id"],
+            "appointment_start_datetime": (
+                start_time + timedelta(minutes=30)
+            ).isoformat(),
+            "appointment_duration": 30,
+        },
+    )
+
+    assert res2.status_code == 409
+
+
 def test_list_appointments(client):
     res = client.get("/appointments?date=2099-01-01")
     assert res.status_code == 200
