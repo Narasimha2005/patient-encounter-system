@@ -18,7 +18,13 @@ from src.schemas.patient import (
 )
 from src.services import appointment_service, doctor_service, patient_service
 
-app = FastAPI(title="Patient Encounter System")
+app = FastAPI(
+    title="Patient Encounter System",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+)
 
 
 def get_db():
